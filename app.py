@@ -249,3 +249,5 @@ elif page == "🤖 Retention Copilot":
                 income = st.number_input("Monthly Income", 2000, 20000, 5000)
             with col2:
                 ot = st.selectbox("Overtime", ["Yes", "No"])
+                wlb = st.slider("Work Life Balance", 1, 4, 3)
+                tenure = st.number_input("Years at Company", 0, 40, 5)
