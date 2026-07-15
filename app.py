@@ -106,6 +106,18 @@ st.markdown("""
         color: #000000 !important;
     }
 
+    /* Inline code spans (e.g. `Feature_Name` from AI responses) default to
+       a dark background in Streamlit. Combined with the black text forced
+       above, that made them unreadable black-on-black. Give them a light
+       background so the black text is visible again. */
+    [data-testid="stMarkdownContainer"] code {
+        background-color: #eef2f7 !important;
+        color: #000000 !important;
+        padding: 2px 6px;
+        border-radius: 4px;
+        border: 1px solid #cbd5e1;
+    }
+
     /* 3. SIDEBAR */
     [data-testid="stSidebar"] {
         background-color: #e3f2fd !important;
