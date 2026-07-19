@@ -327,19 +327,129 @@ else:
 
 if page == "📊 Exec Dashboard":
     st.markdown("## Executive Overview")
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.markdown(
-            '<div class="card"><h4>Headcount</h4><h2>4,500</h2><p style="color:green !important">↑ 12</p></div>', unsafe_allow_html=True)
-    with col2:
-        st.markdown(
-            '<div class="card"><h4>Attrition</h4><h2>19.2%</h2><p style="color:red !important">↑ 1.2%</p></div>', unsafe_allow_html=True)
-    with col3:
-        st.markdown(
-            '<div class="card"><h4>Positions</h4><h2>42</h2><p style="color:grey !important">Open</p></div>', unsafe_allow_html=True)
-    with col4:
-        st.markdown(
-            '<div class="card"><h4>Avg Tenure</h4><h2>4.2y</h2><p style="color:green !important">Stable</p></div>', unsafe_allow_html=True)
+
+    # --- Normalize Attrition into a boolean flag (handles Yes/No, 1/0, True/False) ---
+    def _is_attrited(val):
+        if pd.isna(val):
+            return False
+        return str(val).strip().lower() in ("yes", "1", "true", "left")
+
+    dash_df = df.copy()
+    dash_df['_Attrited'] = dash_df['Attrition'].apply(_is_attrited) if 'Attrition' in dash_df.columns else False
+
+    # --- FILTERS ---
+    st.markdown("#### Filters")
+    fc1, fc2, fc3 = st.columns([2, 2, 1])
+    with fc1:
+        dept_options = sorted(dash_df['Department'].dropna().unique()) if 'Department' in dash_df.columns else []
+        dept_filter = st.multiselect("Department", dept_options, default=dept_options)
+    with fc2:
+        role_options = sorted(dash_df['Job_Role'].dropna().unique()) if 'Job_Role' in dash_df.columns else []
+        role_filter = st.multiselect("Job Role", role_options, default=role_options)
+    with fc3:
+        st.write("")
+        st.write("")
+        if st.button("🔄 Reset"):
+            st.session_state.selected_kpi = None
+            st.rerun()
+
+    if dept_filter and 'Department' in dash_df.columns:
+        dash_df = dash_df[dash_df['Department'].isin(dept_filter)]
+    if role_filter and 'Job_Role' in dash_df.columns:
+        dash_df = dash_df[dash_df['Job_Role'].isin(role_filter)]
+
+    if dash_df.empty:
+        st.warning("⚠️ No employees match the selected filters.")
+        st.stop()
+
+    # --- LIVE KPIs ---
+    headcount = len(dash_df)
+    attrition_rate = dash_df['_Attrited'].mean() * 100
+    avg_tenure = dash_df['Years_at_Company'].mean() if 'Years_at_Company' in dash_df.columns else None
+
+    if 'selected_kpi' not in st.session_state:
+        st.session_state.selected_kpi = None
+
+    st.divider()
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        st.markdown(f'<div class="card"><h4>Headcount</h4><h2>{headcount:,}</h2></div>', unsafe_allow_html=True)
+        if st.button("🔍 View breakdown", key="kpi_head", use_container_width=True):
+            st.session_state.selected_kpi = "headcount"
+    with k2:
+        st.markdown(f'<div class="card"><h4>Attrition</h4><h2>{attrition_rate:.1f}%</h2></div>', unsafe_allow_html=True)
+        if st.button("🔍 View breakdown", key="kpi_attr", use_container_width=True):
+            st.session_state.selected_kpi = "attrition"
+    with k3:
+        st.markdown('<div class="card"><h4>Positions</h4><h2>N/A</h2>'
+                     '<p style="color:grey !important">Not in current dataset</p></div>', unsafe_allow_html=True)
+        if st.button("🔍 Why N/A?", key="kpi_pos", use_container_width=True):
+            st.session_state.selected_kpi = "positions"
+    with k4:
+        tenure_display = f"{avg_tenure:.1f}y" if avg_tenure is not None else "N/A"
+        st.markdown(f'<div class="card"><h4>Avg Tenure</h4><h2>{tenure_display}</h2></div>', unsafe_allow_html=True)
+        if st.button("🔍 View breakdown", key="kpi_tenure", use_container_width=True):
+            st.session_state.selected_kpi = "tenure"
+
+    # --- CHARTS ---
+    st.divider()
+    cc1, cc2 = st.columns(2)
+    with cc1:
+        st.markdown("#### Attrition Rate by Department")
+        if 'Department' in dash_df.columns:
+            dept_stats = dash_df.groupby('Department')['_Attrited'].mean().mul(100).sort_values(ascending=False)
+            st.bar_chart(dept_stats)
+        else:
+            st.info("No 'Department' column found in the dataset.")
+    with cc2:
+        st.markdown("#### Attrition Rate by Tenure Band")
+        if 'Years_at_Company' in dash_df.columns:
+            bins = [0, 1, 3, 5, 10, 100]
+            band_labels = ["<1y", "1-3y", "3-5y", "5-10y", "10y+"]
+            dash_df['_TenureBand'] = pd.cut(dash_df['Years_at_Company'], bins=bins, labels=band_labels, right=False)
+            tenure_stats = dash_df.groupby('_TenureBand', observed=True)['_Attrited'].mean().mul(100)
+            st.bar_chart(tenure_stats)
+        else:
+            st.info("No 'Years_at_Company' column found in the dataset.")
+
+    # --- DRILL-DOWN DETAIL (from clicking a KPI card) ---
+    if st.session_state.selected_kpi:
+        st.divider()
+        st.markdown("### 🔎 Detail View")
+        sel = st.session_state.selected_kpi
+
+        if sel == "headcount":
+            if 'Department' in dash_df.columns:
+                st.dataframe(dash_df['Department'].value_counts().rename("Headcount"), use_container_width=True)
+            else:
+                st.write(f"Total employees in current filter: **{headcount:,}**")
+
+        elif sel == "attrition":
+            if 'Department' in dash_df.columns:
+                st.dataframe(
+                    (dash_df.groupby('Department')['_Attrited'].mean() * 100).round(1)
+                    .sort_values(ascending=False).rename("Attrition %"),
+                    use_container_width=True
+                )
+            else:
+                st.write(f"Overall attrition rate: **{attrition_rate:.1f}%**")
+
+        elif sel == "positions":
+            st.info("Open headcount requisitions aren't part of this employee-level dataset. "
+                     "To make this KPI live, add an 'Open_Positions' source (e.g. a separate "
+                     "recruiting CSV keyed by Department) and I can wire it in.")
+
+        elif sel == "tenure":
+            if 'Years_at_Company' in dash_df.columns:
+                st.bar_chart(dash_df['Years_at_Company'].value_counts().sort_index())
+            else:
+                st.write("No 'Years_at_Company' column found in the dataset.")
+
+        if st.button("✖️ Close detail view"):
+            st.session_state.selected_kpi = None
+            st.rerun()
+
+    st.divider()
     st.image("https://upload.wikimedia.org/wikipedia/commons/e/ec/World_map_blank_without_borders.svg",
              caption="Global Operations Map")
 
